@@ -1,0 +1,7 @@
+# el zip de pruebas
+*.zip
+
+# la cancion: ver README antes de quitar esta linea
+*.mp3
+*.m4a
+*.ogg
