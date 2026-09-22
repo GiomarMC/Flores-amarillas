@@ -28,9 +28,9 @@ El reproductor de YouTube se crea al cargar la página, en mudo y ya sonando —
 que es lo único que los navegadores permiten sin un gesto del usuario. El clic
 en el regalo solo le quita el mudo, y por eso la canción entra en el acto.
 
-El `.gitignore` deja fuera los archivos de audio. Si quieres desplegar el mp3
-con la página (más fiable que YouTube en móviles), borra esa línea del
-`.gitignore` y haz `git add -f the-night-we-met.mp3`.
+El mp3 va en el repo a propósito: en iOS, quitarle el mudo a un iframe de
+YouTube desde fuera del reproductor suele fallar, y con el archivo local eso
+deja de depender de nadie.
 
 ## Editar los mensajes
 
