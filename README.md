@@ -24,9 +24,17 @@ La página intenta, en este orden:
 2. YouTube (`KtlgYxa6BMU`), que solo funciona servido por http/https
 3. un pad sintetizado, para que nunca quede en silencio
 
-El reproductor de YouTube se crea al cargar la página, en mudo y ya sonando —
-que es lo único que los navegadores permiten sin un gesto del usuario. El clic
-en el regalo solo le quita el mudo, y por eso la canción entra en el acto.
+El orden no se decide al cargar: el mp3 se intenta **siempre primero**, con un
+`play()` síncrono dentro del clic en el regalo. Esa llamada dentro de un gesto
+del usuario es lo único que todos los navegadores aceptan sin discutir, móviles
+incluidos. Solo si falla se pasa a YouTube, que ya está creado en mudo desde la
+carga de la página para no perder el gesto.
+
+Un `pointerdown` sobre la caja, 100 ms antes del clic, despierta el
+`AudioContext` (nace suspendido si no hay gesto) y empuja la descarga del mp3.
+
+Lo único que la página no puede saltarse: si un iPhone tiene el interruptor
+lateral en silencio, el audio HTML no suena. No hay web que lo evite.
 
 El mp3 va en el repo a propósito: en iOS, quitarle el mudo a un iframe de
 YouTube desde fuera del reproductor suele fallar, y con el archivo local eso

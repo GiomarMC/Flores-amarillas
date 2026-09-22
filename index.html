@@ -1178,8 +1178,7 @@
      ============================================================ */
 
   var fadeTimer = null, synth = null, yt = null, wantSound = true, started = false;
-  var audioOK = null;          // null = todavia no se sabe si el mp3 esta al lado
-  var ytReady = false, ytPending = false, probeTimer = null;
+  var audioOK = null, ytReady = false, ytPending = false, ac = null, unlocked = false;
 
   function markPlaying(on){
     soundBtn.classList.toggle("is-playing", !!on);
@@ -1193,12 +1192,16 @@
     soundBtn.classList.remove("is-playing");
   }
 
+  function setVol(v){
+    try { song.volume = Math.min(1, Math.max(0, v)); } catch (e){ /* en iOS es de solo lectura */ }
+  }
+
   function fadeTo(target, ms){
     clearInterval(fadeTimer);
     var from = song.volume, steps = Math.max(1, Math.round(ms / 50)), n = 0;
     fadeTimer = setInterval(function(){
       n++;
-      song.volume = Math.min(1, Math.max(0, from + (target - from) * (n / steps)));
+      setVol(from + (target - from) * (n / steps));
       if (n >= steps){
         clearInterval(fadeTimer);
         if (target === 0) song.pause();
@@ -1206,29 +1209,42 @@
     }, 50);
   }
 
-  /* Al cargar la pagina averiguamos si el mp3 esta ahi. Si no, dejamos el
-     reproductor de YouTube ya creado y sonando en mudo: el autoplay silencioso
-     si esta permitido, y asi el clic en el regalo solo tiene que quitar el mudo,
-     que es lo unico que el navegador exige que salga de un gesto tuyo. */
+  /* El navegador solo concede audio dentro de un gesto tuyo, y el primero que
+     hay es el pointerdown sobre la caja: ahi despertamos el AudioContext (que
+     nace suspendido si no) y empujamos la descarga del mp3, para que el clic
+     que viene 100 ms despues encuentre todo listo. */
+  function unlock(){
+    if (unlocked) return;
+    unlocked = true;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC && !ac) ac = new AC();
+      if (ac && ac.state === "suspended" && ac.resume) ac.resume();
+    } catch (e){}
+    try { if (!started) song.load(); } catch (e){}
+  }
+
+  /* Solo sirve para tener YouTube preparado por si el mp3 no esta. La fuente
+     definitiva NO se decide aqui: se decide en el clic, probando el archivo. */
   function probeAudio(){
     if (!MUSICA.archivo){ prepareYouTube(); return; }
+    if (location.protocol === "file:") return;
 
-    song.addEventListener("canplay", function(){
-      if (audioOK === null){ audioOK = true; clearTimeout(probeTimer); }
-    });
-    song.addEventListener("error", function(){
-      if (audioOK === null){ audioOK = false; clearTimeout(probeTimer); prepareYouTube(); }
-    });
-    probeTimer = setTimeout(function(){
-      if (audioOK === null){ audioOK = false; prepareYouTube(); }
-    }, 2500);
-
-    try { song.load(); } catch (e){ audioOK = false; prepareYouTube(); }
+    // un HEAD dice si el archivo existe sin depender del preload, que en
+    // moviles el navegador ignora para ahorrar datos
+    try {
+      fetch(MUSICA.archivo, { method: "HEAD" })
+        .then(function(r){
+          audioOK = r.ok;
+          if (!r.ok) prepareYouTube();
+        })
+        .catch(function(){ audioOK = null; prepareYouTube(); });
+    } catch (e){ prepareYouTube(); }
   }
 
   function prepareYouTube(){
     if (!MUSICA.youtube || yt) return;
-    // con file:// el origen es "null" y YouTube rechaza el embed: ahi no hay nada que hacer
+    // con file:// el origen es "null" y YouTube rechaza el embed
     if (location.protocol === "file:") return;
 
     window.onYouTubeIframeAPIReady = function(){
@@ -1275,26 +1291,37 @@
     } catch (e){ startSynth(); }
   }
 
-  function playFile(){
-    song.volume = 0;
-    var p;
-    try { p = song.play(); } catch (e){ return false; }
-    if (p && p.then){
-      p.then(function(){ started = true; markPlaying(true); fadeTo(MUSICA.volumen, 2200); })
-       .catch(function(){ audioOK = false; prepareYouTube(); ytPending = true; needsTap(); });
-    } else {
-      started = true; markPlaying(true); fadeTo(MUSICA.volumen, 2200);
+  function afterFile(){
+    started = false;
+    clearInterval(fadeTimer);
+    if (ytReady) unleashYouTube();
+    else if (yt) ytPending = true;
+    else {
+      prepareYouTube();
+      setTimeout(function(){ if (!started) startSynth(); }, 2500);
     }
-    return true;
   }
 
-  /* Esto se llama DENTRO del clic en el regalo: nada de esperas asincronas antes. */
+  /* Esto corre DENTRO del clic en el regalo. El mp3 se intenta siempre primero
+     y de forma sincrona: una llamada a play() dentro de un gesto es lo unico
+     que todos los navegadores, moviles incluidos, aceptan sin discutir. */
   function startMusic(){
-    if (audioOK === true){ playFile(); }
-    else if (ytReady){ unleashYouTube(); }
-    else if (yt){ ytPending = true; }
-    else if (audioOK === null){ playFile(); }
-    else { startSynth(); }
+    var launched = false;
+    try {
+      setVol(Math.min(0.45, MUSICA.volumen));   // audible ya, sin esperar al fundido
+      var p = song.play();
+      launched = true;
+      started = true;
+      markPlaying(true);
+      fadeTo(MUSICA.volumen, 900);
+      if (p && p.then) p.catch(afterFile);
+    } catch (e){ launched = false; }
+
+    if (!launched){
+      if (ytReady) unleashYouTube();
+      else if (yt) ytPending = true;
+      else startSynth();
+    }
 
     // ultima red: si a los 5 s no suena nada, entra el pad
     setTimeout(function(){ if (wantSound && !started) startSynth(); }, 5000);
@@ -1304,9 +1331,10 @@
     if (synth || started) return;
     try {
       var AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      var ac = new AC();
+      if (!ac && AC) ac = new AC();
+      if (!ac) return;
       if (ac.state === "suspended" && ac.resume) ac.resume();
+
       var master = ac.createGain();
       master.gain.value = 0.0001;
       master.connect(ac.destination);
@@ -1340,15 +1368,19 @@
   }
 
   function toggleSound(){
+    unlock();
     // si el navegador se planto, el primer toque solo sirve para desbloquear
     if (soundBtn.classList.contains("needs-tap")){
+      if (!song.paused || audioOK !== false){ startMusic(); return; }
       if (yt && ytReady){ unleashYouTube(); return; }
-      if (audioOK !== false && playFile()) return;
       startSynth(); return;
     }
 
     wantSound = !wantSound;
-    if (yt && ytReady){
+    if (started && !song.paused){
+      if (wantSound){ song.play(); fadeTo(MUSICA.volumen, 400); } else { fadeTo(0, 500); }
+      markPlaying(wantSound);
+    } else if (yt && ytReady){
       if (wantSound){ yt.unMute(); yt.playVideo(); } else { yt.pauseVideo(); }
       markPlaying(wantSound);
     } else if (synth){
@@ -1423,6 +1455,7 @@
   tick();
   probeAudio();
 
+  giftBtn.addEventListener("pointerdown", unlock);
   giftBtn.addEventListener("click", open);
   document.getElementById("dClose").addEventListener("click", close);
   document.getElementById("again").addEventListener("click", restart);
